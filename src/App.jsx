@@ -163,12 +163,15 @@ export default function App() {
     let stopped = false;
     let altStep = 0;
     let lastTopName = null;
-    const epoch = roundEpoch.current;
 
     (async () => {
       while (!stopped) {
         const current = guessesRef.current;
         if (current.length === 0) {
+          // Empty means the canvas was just wiped (Clear) or nothing is drawn
+          // yet. Forget the last announcement so the first guess after a redraw
+          // is spoken fresh, not muttered as a repeat.
+          lastTopName = null;
           await wait(300);
           continue;
         }
@@ -198,6 +201,10 @@ export default function App() {
           altStep += 1;
         }
 
+        // Capture the canvas version we're about to speak for. If a Clear or a
+        // new round bumps it while we speak, this guess no longer describes what
+        // is on the canvas and must not win.
+        const pickedEpoch = roundEpoch.current;
         setNarration(displayName(pick.label));
 
         // Capped, because the win now rides on this await. Speech pathologies
@@ -207,13 +214,13 @@ export default function App() {
         if (soundOn) await Promise.race([speak(displayName(pick.label)), wait(SPEAK_CEILING_MS)]);
         else await wait(800);
 
-        // A different round owns the canvas now — never win for it.
-        if (epoch !== roundEpoch.current) break;
-
-        // The word left the AI's mouth, so it is earned. Checked BEFORE
+        // The word left the AI's mouth, so it is earned — checked BEFORE
         // `stopped`, because the timer expiring mid-word also sets `stopped`,
-        // and losing a round you just won reads as theft.
-        if (pick.label === word) {
+        // and losing a round you just won reads as theft. The epoch guard only
+        // blocks the WIN, never the loop: a mid-round Clear used to `break` here,
+        // killing narration for the rest of the round (draw again → AI frozen).
+        // Now the loop keeps running and simply won't win on a wiped guess.
+        if (pick.label === word && pickedEpoch === roundEpoch.current) {
           setStatus('won');
           break;
         }
